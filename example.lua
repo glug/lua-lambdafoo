@@ -3,20 +3,40 @@
 
 -- types <<<
 
-dtype = {}
+env = {}
 
-dtype.nat = {}
-dtype.nat.O = {}
-dtype.nat.S = { "nat" }
+env.Type = {
+    "Type",
+    Fun = { "Type", "Type" },
+}
 
-dtype.natList = {}
-dtype.natList.Nil = {}
-dtype.natList.Cons = { "nat", "natList" }
+env.nat = {
+    "Type",
+    O = {},
+    S = { "nat" },
+}
 
-dtype.void = {}
+env.natList = {
+    "Type",
+    Nil = {},
+    Cons = { "nat", "natList" },
+}
 
-dtype.unit = {}
-dtype.unit.tt = {}
+env.unit = {
+    "Type",
+    tt = {},
+}
+
+env.term = {
+    "Type",
+    App = { "term", "term" },
+    Ref = { "nat" },
+    Fun = { "term" },
+}
+
+env.void = {
+    "Type"
+}
 
 -- >>>
 
@@ -93,6 +113,26 @@ inval_list = {
 
 -- >>>
 
+-- invalid untyped values <<<
+
+uinval_1 = { "S", { "tt" } }
+uinval_2 = { "S", uinval_1 }
+
+uinval_list1 = { "Cons", val_2,
+                    { "Cons", val_0,
+                        { "Cons", val_1,
+                            { "Nil", { "Nil" } }}}}
+
+uinval_list2 = { "Cons", val_2,
+                    { "Cons", val_0,
+                        { "Cons", val_1,
+                            { "tt" }}}}
+
+uval_loop = { "Cons", val_0 }
+uval_loop[3] = uval_loop
+
+-- >>>
+
 -- field checker <<<
 local function checkFieldsWith(f_rec, constructor, val, _type, _indent)
     -- wrong number of fields
@@ -116,10 +156,10 @@ local function checkFieldsWith(f_rec, constructor, val, _type, _indent)
         -- skip constructor
         if i ~= 1 then
             local fieldtype = constructor[i-1]
-            print(string.format("%s #%d : %s?",
-                                    string.rep(" ", _indent*4),
-                                    i-1,
-                                    fieldtype))
+--            print(string.format("%s #%d : %s?",
+--                                    string.rep(" ", _indent*4),
+--                                    i-1,
+--                                    fieldtype))
             local t, _err = f_rec(v,fieldtype, _indent+1)
             if not t then
                 return nil, string.format(
@@ -143,12 +183,12 @@ function checkType(val, _type, _indent)
     -- need to find type?
     _type = _type or val._type
     if not _type then
-        for ty, constructors in pairs(dtype) do
+        for ty, constructors in pairs(env) do
             -- check if constructor exists
             local foo = constructors[val[1]]
             if foo then
-                print(string.format("%s%s { ... } : %s?",
-                                        string.rep(" ",_indent*4), val[1], ty))
+--                print(string.format("%s%s { ... } : %s?",
+--                                        string.rep(" ",_indent*4), val[1], ty))
                 _type = ty
                 constructor = foo
                 break
@@ -157,7 +197,7 @@ function checkType(val, _type, _indent)
     else
 --        print(string.format("%s%s : %s!?", string.rep(" ", _indent*4), val[1], _type))
         -- check if constructor for this type exists
-        constructor = dtype[_type][val[1]]
+        constructor = env[_type][val[1]]
         if not constructor then
             return nil, string.format("\n%sinvalid constructor %s for type %s",
                                 string.rep(" ",_indent*2), val[1], _type)
@@ -169,6 +209,8 @@ function checkType(val, _type, _indent)
                                     string.rep(" ", _indent*2),
                                     val[1])
     end
+    -- Type is Type TODO
+    if _type == "Type" then return "Type" end
     -- check type, infer lower levels
     return checkFieldsWith(checkType, constructor, val, _type, _indent)
 end
