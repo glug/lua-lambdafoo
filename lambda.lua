@@ -420,7 +420,7 @@ atom  ::= id
 
 number ::= digit valchars^*
 
-id ::= valchars^*
+id ::= id1char valchars^*
 
 valchars ::= << all but parens "()" and whitespace " \t\r\n\v" >>
 digit ::= << 0-9 >>
@@ -448,7 +448,7 @@ function parseAt(toks,i)
         return ret, i+1
     else
         if string.find(string.sub(tok,1,1),"%d") then
-            return tonumber(tok), i+1
+            return tonumber(tok), i+1   -- NOTE extend to other formats later
         else
             return tok, i+1
         end
