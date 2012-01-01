@@ -5,6 +5,8 @@
 
 env = {}
 
+-- PRIM id  -- variables
+
 env.nat = {
     O   = { },
     S   = { "nat" },
@@ -14,54 +16,44 @@ env.term = {
     app = { "term", "term" },
     lam = { "term" },
     var = { "nat" },
+    ref = { "id" },
 }
 
 -- >>>
 
 -- values <<<
 
-val_0 = { "O" }
-val_1 = { "S", val_0 }
-val_2 = { "S", val_1 }
+env.v0 = { "O" }
+env.v1 = { "S", env.v0 }
+env.v2 = { "S", env.v1 }
 
-fun_K = {
-    "lam",
-    {
-        "lam",
-        {
-            "var",
+env.K = {
+"lam",
+    { "lam",
+        { "var",
             1,
         },
     },
 }
 
-fun_S = {
-    "lam",
-    {
-        "lam",
-        {
-            "lam",
-            {
-                "app",
-                {
-                    "app",
-                    {
-                        "var",
+env.S = {
+"lam",
+    { "lam",
+        { "lam",
+            { "app",
+                { "app",
+                    { "var",
                         2,
                     },
-                    {
-                        "var",
+                    { "var",
                         0,
                     },
                 },
-                {
-                    "app",
-                    {
-                        "var",
+                { "app",
+                    { "var",
                         1,
                     },
-                    {
-                        "var",
+                    { "var",
                         0,
                     },
                 },
@@ -70,42 +62,33 @@ fun_S = {
     },
 }
 
-fun_I = {
-    "app",
-    {
-        "app",
-        fun_S,
-        fun_K,
+env.I = {
+"app",
+    { "app",
+        { "ref", "S" },
+        { "ref", "K" },
     },
-    fun_K,
+    { "ref", "K" },
 }
 
-fun_inc = {
-    "lam",
-    {
-        "app",
+env.inc = {
+"lam",
+    { "app",
         { "S" },
         { "var", 0 },
     }
 }
 
-_fun_plus = {
-    "lam",
-    {
-        "lam",
-        {
-            "lam",
-            {
-                "rec",
-                { "var", 1 },
+env.plus = {
+"lam",
+    { "lam",
+        { "lam",
+            { "rec", { "var", 1 },
                 O = { "var", 0 },
                 S = { "lam",
-                        {
-                            "S",
-                            {
-                                "app",
-                                {
-                                    "app",
+                        { "S",
+                            { "app",
+                                { "app",
                                     { "app", { "var", 3 }, { "var", 3 } },
                                     { "var", 0 }
                                 },
@@ -313,22 +296,38 @@ function iota(tm)
     end
 end
 
+function delta(tm)
+    local cname = tm[1]
+    if cname == "ref" then
+        local v = env[tm[2]]
+        if not v then
+            return nil, "undefined variable '"..tostring(tm[2]).."'"
+        else
+            return v
+        end
+    end
+    -- generic walk
+    local red = walk_step(delta,tm)
+    if red then
+        return red
+    else
+        return nil, "SUBSTITUTED _ALL_ THE VARIABLES!"
+    end
+end
+
 function reduce(tm, max)
     max = max or 100
+    local red
     if max < 1 then
         return nil, "timeout"
     else
-        local red = iota(tm)
-        if red then
-            return reduce(red, max-1)
-        else
-            red = beta(tm)
+        for _,f in ipairs{ iota, beta, delta } do
+            local red = f(tm)
             if red then
                 return reduce(red, max-1)
-            else
-                return tm
             end
         end
+        return tm
     end
 end
 
@@ -367,6 +366,8 @@ function _show(tm, indent)
             _show(tm[2], indent.." ")
         elseif cname == "var" then
             io.write("{",tostring(tm[2]),"}")
+        elseif cname == "ref" then
+            io.write("@[",tostring(tm[2]),"]")
         elseif cname == "app" then
             io.write "+"
             _show(tm[2], indent.."|")
