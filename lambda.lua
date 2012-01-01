@@ -21,90 +21,6 @@ env.term = {
 
 -- >>>
 
--- values <<<
-
-env.v0 = { "O" }
-env.v1 = { "S", env.v0 }
-env.v2 = { "S", env.v1 }
-
-env.K = {
-"lam",
-    { "lam",
-        { "var",
-            1,
-        },
-    },
-}
-
-env.S = {
-"lam",
-    { "lam",
-        { "lam",
-            { "app",
-                { "app",
-                    { "var",
-                        2,
-                    },
-                    { "var",
-                        0,
-                    },
-                },
-                { "app",
-                    { "var",
-                        1,
-                    },
-                    { "var",
-                        0,
-                    },
-                },
-            }
-        },
-    },
-}
-
-env.I = {
-"app",
-    { "app",
-        { "ref", "S" },
-        { "ref", "K" },
-    },
-    { "ref", "K" },
-}
-
-env.inc = {
-"lam",
-    { "app",
-        { "S" },
-        { "var", 0 },
-    }
-}
-
-env.plus = {
-"lam",
-    { "lam",
-        { "lam",
-            { "rec", { "var", 1 },
-                O = { "var", 0 },
-                S = { "lam",
-                        { "S",
-                            { "app",
-                                { "app",
-                                    { "app", { "var", 3 }, { "var", 3 } },
-                                    { "var", 0 }
-                                },
-                                { "var", 1 }
-                            },
-                        },
-                    }
-            }
-        }
-    }
-}
-
-fun_plus = { "app", _fun_plus, _fun_plus }
-
--- >>>
-
 -- lua helpers <<<
 
 function copy(t)
@@ -245,7 +161,7 @@ function tryApply(t1,t2)
     end
 end
 
-function beta(tm, lazy)
+function beta(tm, _ignored, lazy)
     local cname = tm[1]
     if cname == "app" then
         local red = beta(tm[2],lazy)
@@ -270,7 +186,7 @@ function beta(tm, lazy)
 end
 
 -- pattern matching
-function iota(tm)
+function iota(tm,many)
     local cname = tm[1]
     if cname == "rec" then
         local v = tm[2]
@@ -288,7 +204,7 @@ function iota(tm)
         end
     end
     -- generic walk
-    local red = walk_step(iota,tm)
+    local red = (many and walk_all or walk_step)(iota,tm)
     if red then
         return red
     else
@@ -296,7 +212,7 @@ function iota(tm)
     end
 end
 
-function delta(tm)
+function delta(tm,many)
     local cname = tm[1]
     if cname == "ref" then
         local v = env[tm[2]]
@@ -307,7 +223,7 @@ function delta(tm)
         end
     end
     -- generic walk
-    local red = walk_step(delta,tm)
+    local red = (many and walk_all or walk_step)(delta,tm,many)
     if red then
         return red
     else
@@ -322,7 +238,7 @@ function reduce(tm, max)
         return nil, "timeout"
     else
         for _,f in ipairs{ iota, beta, delta } do
-            local red = f(tm)
+            local red = f(tm,true)
             if red then
                 return reduce(red, max-1)
             end
@@ -333,7 +249,7 @@ end
 
 -- >>>
 
--- pretty printing <<<
+-- ugly printing <<<
 
 -- tostring
 function dump(tm)
@@ -345,9 +261,36 @@ function dump(tm)
             return "{"..tostring(tm[2]).."}"
         elseif cname == "app" then
             return "("..dump(tm[2])..dump(tm[3])..")"
+        elseif cname == "ref" then
+            return '@"'..tostring(tm[2])..'"'
+        elseif cname == "rec" then
+            local str = "?"..dump(tm[2]).."{|"
+            for k, v in pairs(tm) do
+                if type(k) ~= "number" then
+                    str = str..tostring(k)..":"..dump(v).."|"
+                end
+            end
+            str = str.."}"
+            return str
         else
-            return "<?>"
+            local _ty, c = findConstructorType(cname)
+            if not _ty then
+                return "<?>"
+            else
+                local str = cname
+                local nfields = #c
+                if nfields > 0 then
+                    str = str .. "[" .. dump(tm[2])
+                    for k = 2, nfields do
+                        str = str .. "," .. dump(tm[k+1])
+                    end
+                    str = str .. "]"
+                end
+                return str
+            end
         end
+    elseif tm == nil then
+        return "_"
     else
         return "<?>"
     end
@@ -367,7 +310,7 @@ function _show(tm, indent)
         elseif cname == "var" then
             io.write("{",tostring(tm[2]),"}")
         elseif cname == "ref" then
-            io.write("@[",tostring(tm[2]),"]")
+            io.write('@"',tostring(tm[2]),'"')
         elseif cname == "app" then
             io.write "+"
             _show(tm[2], indent.."|")
@@ -388,12 +331,14 @@ function _show(tm, indent)
             if not _ty then
                 io.write "<?>"
             else
-                io.write(cname,"*")
+                io.write(cname)
                 indent = indent .. string.rep(" ", #cname)
                 local nfields = #c
                 for k = 1, nfields do
                     local endc = k ~= nfields and "!" or " "
-                    if k ~= 1 then
+                    if k == 1 then
+                        io.write "["
+                    else
                         io.write(indent, endc)
                     end
                     local v = tm[k+1]
@@ -404,6 +349,9 @@ function _show(tm, indent)
                     else
                         io.write("<",tostring(v),">")
                     end
+                    if k == nfields then
+                        io.write "]"
+                    end
                 end
             end
         end
@@ -411,6 +359,190 @@ function _show(tm, indent)
         return nil
     end
 end
+
+-- >>>
+
+-- whacky parsing <<<
+
+--  special:
+--      ( )
+--      numbers
+--      whitespace
+
+function tokenize(str)
+    -- character classes
+    local pat_endtok = "[() \t\r\n\v]"
+    local pat_paren = "[()]"
+    -- state
+    local accumulator
+    -- result
+    local tokens = { "(" }
+    -- computation
+    for c in string.gmatch(str,".") do
+        -- id
+        if accumulator then
+            -- end & start next or append
+            if string.find(c, pat_endtok) then
+                table.insert(tokens,table.concat(accumulator))
+                if string.find(c, pat_paren) then
+                    table.insert(tokens, c)
+                end
+                accumulator = nil
+            else
+                table.insert(accumulator, c)
+            end
+        else
+            if string.find(c,pat_paren) then
+                table.insert(tokens, c)
+            elseif string.find(c, pat_endtok) then
+                -- ignore ws
+            else
+                accumulator = { c }
+            end
+        end
+    end
+    if accumulator then
+        table.insert(tokens, table.concat(accumulator))
+    end
+    tokens[#tokens+1] = ")"
+    return tokens
+end
+
+--[[ grammar (sort of)
+
+expr  ::= '(' exprlist ')'
+        | atom
+
+exprlist  ::= expr^*
+
+atom  ::= id
+        | number
+
+number ::= digit valchars^*
+
+id ::= valchars^*
+
+valchars ::= << all but parens "()" and whitespace " \t\r\n\v" >>
+digit ::= << 0-9 >>
+id1char ::=  << any non-digit valchars >>
+
+--]]
+
+function parseAt(toks,i)
+    i = i or 1
+    local ret = {}
+    local tok = toks[i]
+    if tok == ")" then
+        error "unbalanced parentheses"
+    elseif tok == "(" then
+        i = i + 1
+        while toks[i] ~= ")" do
+            local val, newi = parseAt(toks,i)
+            if not val then
+                error "invalid state"
+            else
+                table.insert(ret, val)
+                i = newi
+            end
+        end
+        return ret, i+1
+    else
+        if string.find(string.sub(tok,1,1),"%d") then
+            return tonumber(tok), i+1
+        else
+            return tok, i+1
+        end
+    end
+end
+
+-- rewrite all 'rec' subentries
+--   from (case <constructor> <value>)
+--   to   <constructor> = { <value> }
+function fixCase(tm)
+    local cname = tm[1]
+    if cname == "rec" then
+        for k,v in ipairs(tm) do
+            if v[1] == "case" then
+                tm[v[2]] = v[3]
+                tm[k] = nil
+            end
+        end
+    end
+    -- generic walk
+    local red = walk_all(fixCase,tm)
+    if red then
+        return red
+    else
+        return nil, "MATCHED _ALL_ THE PATTERNS!"
+    end
+end
+
+function loadlam(str)
+    local tm = parseAt(tokenize(str))[1]
+    return fixCase(tm) or tm
+end
+
+-- >>>
+
+-- some values <<<
+
+function ld(s,nored)
+    local v, _err = loadlam(s)
+    if not v then
+        return nil, _err
+    end
+    if nored then
+        return v
+    else
+        return reduce(v) or v
+    end
+end
+
+env.v0 = ld [[ (O) ]]
+env.v1 = ld [[ (S (ref v0)) ]]
+env.v2 = ld [[ (S (ref v1)) ]]
+
+env.K = ld [[
+(lam
+  (lam
+    (var 1)))
+]]
+
+env.S = ld [[
+(lam
+  (lam
+    (lam
+      (app
+        (app (var 2) (var 0))
+        (app (var 1) (var 0))))))
+]]
+
+env.I = ld [[
+(app
+  (app (ref S) (ref K))
+  (ref K))
+]]
+
+env.inc = ld [[
+(lam
+  (app (S) (var 0)))
+]]
+
+env._plus = ld [[
+(lam
+  (lam
+    (lam
+      (rec (var 1)
+        (case O (var 0))
+        (case S (lam
+                    (S
+                      (app (app (app (var 3) (var 3)) (var 0))
+                           (var 1)))))))))
+]]
+
+env.plus = ld [[ (app (ref _plus) (ref _plus)) ]]
+
+env.twoplustwo = ld [[ (app (app (ref plus) (ref v2)) (ref v2)) ]]
 
 -- >>>
 
