@@ -206,7 +206,12 @@ function iota(tm,many)
     -- generic walk
     local red = (many and walk_all or walk_step)(iota,tm)
     if red then
-        return red
+        -- possibly unfold in current term
+        if type(many) == "number" then
+            many = many - 1
+            many = many > 0 and many
+        end
+        return iota(red,many) or red
     else
         return nil, "MATCHED _ALL_ THE PATTERNS!"
     end
@@ -225,7 +230,12 @@ function delta(tm,many)
     -- generic walk
     local red = (many and walk_all or walk_step)(delta,tm,many)
     if red then
-        return red
+        -- possibly substitute in current term
+        if type(many) == "number" then
+            many = many - 1
+            many = many > 0 and many
+        end
+        return delta(red,many) or red
     else
         return nil, "SUBSTITUTED _ALL_ THE VARIABLES!"
     end
@@ -494,6 +504,8 @@ function ld(s,nored)
     if nored then
         return v
     else
+        v = delta(v,true) or v
+        v = iota(v,true) or v
         return reduce(v) or v
     end
 end
