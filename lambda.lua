@@ -5,7 +5,14 @@
 
 env = {}
 
--- PRIM id  -- variables
+-- PRIM_id  -- variables
+-- PRIM_num -- lambda / de brujin indices
+
+-- special behavior for:
+--   + match
+--   + Record
+--     * Type
+--     ...
 
 env.nat = {
     O   = { },
@@ -15,8 +22,13 @@ env.nat = {
 env.term = {
     app = { "term", "term" },
     lam = { "term" },
-    var = { "nat" },
-    ref = { "id" },
+    var = { "PRIM_num" },
+    ref = { "PRIM_id" },
+}
+
+env.natList = {
+    natNil = { },
+    natCons = { "nat", "natList" }
 }
 
 -- >>>
@@ -552,9 +564,16 @@ env._plus = ld [[
                            (var 1)))))))))
 ]]
 
-env.plus = ld [[ (app (ref _plus) (ref _plus)) ]]
+env.plus = beta( ld [[ (app (ref _plus) (ref _plus)) ]] )
 
 env.twoplustwo = ld [[ (app (app (ref plus) (ref v2)) (ref v2)) ]]
+
+env.someNatList = ld [[
+(natCons (ref v2)
+         (natCons (ref v1)
+                  (natCons (ref v0)
+                           (natNil))))
+]]
 
 -- >>>
 

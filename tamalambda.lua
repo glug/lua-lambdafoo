@@ -97,7 +97,7 @@ function copy(t)
     return newt
 end
 
--- walk over table fields, apply f on table fields until non-nil/false return value
+-- walk over table fields, apply f on table fields until truish value
 --  if f returns false, try next field
 --  if f returns a true value, break and return modified structure
 function walk_step(f, t, ...)
@@ -152,20 +152,35 @@ end
 function isClosedTerm(tm, maxidx)
     maxidx = maxidx or 0
     return match(tm) {
-        { { "app", _tm1, _tm2 }, function(c) return isClosedTerm(c.tm1,maxidx)
-                                                and isClosedTerm(c.tm2,maxidx) end },
-        { { "var", _var }, function(c) return c.var < maxidx end },
-        { { "lam", _tm1 }, function(c) return isClosedTerm(c.tm1, maxidx+1) end },
-        { default, true }
+        { { "app", _tm1, _tm2 },
+                    function(c)
+                        return isClosedTerm(c.tm1,maxidx)
+                           and isClosedTerm(c.tm2,maxidx)
+                    end },
+        { { "var", _var },
+                    function(c) return c.var < maxidx end },
+        { { "lam", _tm1 },
+                    function(c) return isClosedTerm(c.tm1, maxidx+1) end },
+        { default,  true }
     }
 end
 
 function raiseVarAbove(tm,raiseidx)
     raiseidx = raiseidx or -1
     return match(tm) {
-        { { "var", _var }, function(c) if c.var > raiseidx then return { "var", c.var+1 } end end },
-        { { "lam", _tm1 }, function(c) return pack"lam"(raiseVarAbove(c.tm1, raiseidx+1)) end },
-        { default, function() return walk_all(raiseVarAbove, tm, raiseidx) end }
+        { { "var", _var },
+                    function(c)
+                        if c.var > raiseidx then
+                            return { "var", c.var+1 }
+                        end
+                    end },
+        { { "lam", _tm1 },
+                    function(c)
+                        return pack"lam"(raiseVarAbove(c.tm1, raiseidx+1))
+                    end },
+        { default,  function()
+                        return walk_all(raiseVarAbove, tm, raiseidx)
+                    end }
     }
 end
 
@@ -176,15 +191,19 @@ end
 -- substitute t2 into t1 at variable index i
 function subst(t1,t2,i)
     return match(t1) {
-        { { "lam", _tm1 }, function(c) return pack"lam"(subst(c.tm1, t2, i+1)) end },
-        { { "var", _var }, function(c)
-                                if c.var == i then
-                                    return raiseVarAbove(t2,-1) or t2
-                                elseif c.var > i then
-                                    return { "var", c.var - 1 }
-                                end
-                            end },
-        { default, function() return walk_all(subst,t1,t2,i) end }
+        { { "lam", _tm1 },
+                    function(c)
+                        return pack"lam"(subst(c.tm1, t2, i+1))
+                    end },
+        { { "var", _var },
+                    function(c)
+                        if c.var == i then
+                            return raiseVarAbove(t2,-1) or t2
+                        elseif c.var > i then
+                            return { "var", c.var - 1 }
+                        end
+                    end },
+        { default,  function() return walk_all(subst,t1,t2,i) end }
     }
 end
 
@@ -208,11 +227,13 @@ end
 function beta(tm, _ign, lazy)
     local function walk() return walk_step(beta, tm, _ign, lazy) end
     return match(tm) {
-        { { "app", _tm1, _tm2 }, function(c)
-                                    return lazy and pack"app"(beta(c.tm1,_ign,lazy), c.tm2)
-                                        or tryApply(c.tm1, c.tm2)
-                                        or walk()
-                                 end },
+        { { "app", _tm1, _tm2 },
+                    function(c)
+                        return lazy and pack"app"(beta(c.tm1,_ign,lazy),
+                                                    c.tm2)
+                                    or tryApply(c.tm1, c.tm2)
+                                    or walk()
+                    end },
         { default, walk }
     }
 end
@@ -234,19 +255,20 @@ function iota(tm,many)
     end
     -- match
     return match(tm) {
-        { { "rec", _val }, function(c)
-                                local cname = c.val[1]
-                                local _ty, cfields = findConstructorType(cname)
-                                if cname ~= "term" and _ty then
-                                    local f = tm[cname]
-                                    if f then
-                                        for k = 1, #cfields do
-                                            f = pack"app"(f, c.val[k+1])
-                                        end
-                                        return f
-                                    end
+        { { "rec", _val }, partial = true,
+                    function(c)
+                        local cname = c.val[1]
+                        local _ty, cfields = findConstructorType(cname)
+                        if cname ~= "term" and _ty then
+                            local f = tm[cname]
+                            if f then
+                                for k = 1, #cfields do
+                                    f = pack"app"(f, c.val[k+1])
                                 end
-                            end, partial = true },
+                                return f
+                            end
+                        end
+                    end },
         { default, walk }
     }
 end
@@ -285,22 +307,28 @@ end
 function dump(tm)
     if type(tm) == "table" then
         return match(tm) {
-            { { "lam", _tm1 },      function(c) return "($"..dump(c.tm1)..")" end },
-            { { "var", _var },      function(c) return "{"..tostring(c.var).."}" end },
-            { { "app", _tm1, _tm2 },function(c) return "("..dump(c.tm1)..dump(c.tm2)..")" end },
-            { { "ref", _var },      function(c) return '@"'..tostring(c.var)..'"' end },
-            { { "rec", _val },      function(c)
-                                        local str = "?"..dump(c.val).."{|"
-                                        for k,v in pairs(tm) do
-                                            if type(k) ~= "number" then
-                                                str = str..tostring(k)..":"..dump(v).."|"
-                                            end
-                                        end
-                                        str = str.."}"
-                                        return str
-                                    end,
-                                    partial = true },
-            { default, function()
+            { { "lam", _tm1 },
+                        function(c) return "($"..dump(c.tm1)..")" end },
+            { { "var", _var },
+                        function(c) return "{"..tostring(c.var).."}" end },
+            { { "app", _tm1, _tm2 },
+                        function(c)
+                            return "("..dump(c.tm1)..dump(c.tm2)..")"
+                        end },
+            { { "ref", _var },
+                        function(c) return '@"'..tostring(c.var)..'"' end },
+            { { "rec", _val }, partial = true,
+                        function(c)
+                            local str = "?"..dump(c.val).."{|"
+                            for k,v in pairs(tm) do
+                                if type(k) ~= "number" then
+                                    str=str..tostring(k)..":"..dump(v).."|"
+                                end
+                            end
+                            str = str.."}"
+                            return str
+                        end },
+            { default,  function()
                             local cname = tm[1]
                             local _ty, cfields = findConstructorType(cname)
                             if not _ty then return "<?>" end
@@ -332,25 +360,34 @@ function _show(tm, indent)
     local _cond = type(tm)
     if _cond == "table" then
         match(tm) {
-            { { "lam", _tm1 },      function(c) io.write"$" ; _show(c.tm1, indent.." ") end },
-            { { "var", _var },      function(c) io.write("{",tostring(c.var),"}") end },
-            { { "ref", _var },      function(c) io.write('@"',tostring(c.var),'"') end },
-            { { "app", _tm1, _tm2 },function(c)
-                                        io.write "+" ; _show(c.tm1, indent.."|")
-                                        io.write(indent,"\\") ; _show(c.tm2, indent.." ")
-                                    end },
-            { { "rec", _val },      function(c)
-                                        io.write "?" ; _show(c.val, indent..".")
-                                        for k,v in pairs(tm) do
-                                            if type(k) ~= "number" then
-                                                local s = "#"..tostring(k)..":"
-                                                io.write(indent,s)
-                                                _show(v,indent..string.rep(" ",#s))
-                                            end
-                                        end
-                                    end,
-                                    partial = true },
+            { { "lam", _tm1 },
+                        function(c)
+                            io.write"$" ; _show(c.tm1, indent.." ")
+                        end },
+            { { "var", _var },
+                        function(c) io.write("{",tostring(c.var),"}") end },
+            { { "ref", _var },
+                        function(c)io.write('@"',tostring(c.var),'"') end },
+            { { "app", _tm1, _tm2 },
+                        function(c)
+                            io.write "+" ; _show(c.tm1, indent.."|")
+                            io.write(indent,"\\") ; _show(c.tm2,indent.." ")
+                        end },
+            { { "rec", _val }, partial = true,
+                        function(c)
+                            io.write "?" ; _show(c.val, indent..".")
+                            for k,v in pairs(tm) do
+                                if type(k) ~= "number" then
+                                    local s = "#"..tostring(k)..":"
+                                    io.write(indent,s)
+                                    _show(v,indent..string.rep(" ",#s))
+                                end
+                            end
+                        end },
             { default,  function()
+                            local function csel(x,y)
+                                return x ~= y and "!" or " "
+                            end
                             local cname = tm[1]
                             local _ty, cfields = findConstructorType(cname)
                             if not _ty then return io.write "<?>" end
@@ -359,9 +396,9 @@ function _show(tm, indent)
                             local nfields = #cfields
                             if nfields > 0 then
                                 io.write "["
-                                _show(tm[2], indent..(nfields ~= 1 and "!" or " "))
+                                _show(tm[2], indent..csel(nfields,1))
                                 for k = 2, nfields do
-                                    local indent = indent..(k ~= nfields and "!" or " ")
+                                    local indent = indent..csel(k,nfields)
                                     io.write(indent)
                                     _show(tm[k+1], indent)
                                 end
